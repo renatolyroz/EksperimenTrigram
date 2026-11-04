@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tugas 2-Back Trigram</title>
+<style>
+  html,body{margin:0;min-height:100%;background:#fff;color:#111;font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%}
+  #app{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;text-align:center}
+  .panel{max-width:640px;width:100%;text-align:left;line-height:1.55}
+  h1{font-size:1.5rem;margin:0 0 12px}
+  label{display:block;margin:12px 0 4px;font-weight:bold}
+  input,select{font-size:1rem;padding:8px;width:100%;box-sizing:border-box}
+  button{font-size:1.05rem;padding:10px 20px;margin-top:16px;cursor:pointer;border:1px solid #333;background:#f1f1f1;border-radius:6px}
+  button:hover{background:#e4e4e4}
+  #stim{font-size:96px;font-weight:bold;letter-spacing:.08em;height:130px;line-height:130px;font-family:"Courier New",monospace}
+  #fb{height:28px;font-size:1.1rem}
+  #btns{display:flex;gap:16px;margin-top:24px}
+  #btns button{min-width:140px;font-size:1.2rem;padding:16px 24px}
+  .small{color:#555;font-size:.9rem}
+  button,.btnlink{touch-action:manipulation;-webkit-tap-highlight-color:rgba(29,78,216,.25);-webkit-appearance:none;appearance:none}
+  .endbtns{display:flex;flex-direction:column;gap:12px;margin:14px 0}
+  .endbtns button,.endbtns .btnlink{display:block;box-sizing:border-box;width:100%;min-height:52px;margin:0;padding:12px 16px;font-size:1.05rem;text-align:center;text-decoration:none;color:#111;border:1px solid #333;background:#f1f1f1;border-radius:8px;cursor:pointer}
+  .endbtns .primary{background:#1d4ed8;color:#fff;border-color:#1d4ed8}
+  .endmsg{min-height:1.4em;color:#1a5f2e;font-size:.95rem}
+  textarea#datatext{width:100%;box-sizing:border-box;font-size:16px;font-family:"Courier New",monospace;height:140px}
+  details summary{cursor:pointer;padding:8px 0}
+  #btns button{transition:transform .12s ease, background-color .12s ease, box-shadow .12s ease, border-color .12s ease}
+  #btns button.pressed{background:#cfe0ff;border-color:#1d4ed8;box-shadow:0 0 0 4px rgba(29,78,216,.30);transform:scale(.93);animation:pop .22s ease-out}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(.88)}100%{transform:scale(.93)}}
+  #btns.locked button:not(.pressed){opacity:.45}
+  table{border-collapse:collapse;margin-top:8px}
+  td,th{border:1px solid #999;padding:4px 10px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ===================== PENGATURAN (ubah di sini) ===================== */
+const CONFIG = {
+  STIM_MS: 500,          // lama trigram tampil
+  WINDOW_MS: 2000,       // total waktu menjawab sejak trigram muncul (500 trigram + 1.500 "+")
+  KEY_YES: "1",          // tombol Ya (sama dengan 2 trial sebelumnya)
+  KEY_NO: "2",           // tombol Tidak
+  FIRST_TWO_SCORED: true, // trial 1 dan 2 dianggap "Tidak" dan ikut dinilai (keputusan sementara)
+  EMAIL_TO: "",   // pengiriman email dimatikan
+  SHEET_URL: "",  // pengiriman otomatis ke spreadsheet dimatikan
+  FORM_MODE: "both",     // "text" = peserta menempel data di formulir | "file" = peserta mengunggah CSV | "both" = tampilkan keduanya
+  FORM_URL: "https://forms.gle/Mo6CKVaBHxDUwwnFA" // peserta mengunggah file CSV lewat Google Form ini
+};
+
+const LIST_A = "HEV SIJ YIC FEH ZEW ZUQ KAJ JAL TOZ VUB VAF ZIM WUH ZOJ GOX".split(" ");
+const LIST_B = "VAB REH GAQ XAW HIB JOR KES KIG WUF TEV TOV VUM GUZ ZIV SOF".split(" ");
+const MAP_B = Object.fromEntries(LIST_A.map((t,i)=>[t,LIST_B[i]]));
+
+// Urutan blok (List A): 3 blok x 10 trial, 4 target per blok (12 target dari 30 trial, sama dengan Luo). List B memakai struktur sama lewat pemetaan.
+const BLOCKS_A = [
+  "ZIM KAJ TOZ KAJ TOZ YIC SIJ YIC SIJ FEH",   // blok 1: target di trial 4, 5, 8, 9
+  "HEV JAL VAF JAL VAF ZEW HEV ZUQ HEV ZUQ",   // blok 2: target di trial 4, 5, 9, 10
+  "TOZ VUB ZUQ ZEW ZUQ ZEW GOX YIC GOX YIC"   // blok 3: target di trial 5, 6, 9, 10
+].map(s=>s.split(" "));
+
+// Latihan 7 trial (3 target) memakai trigram lain supaya tidak bocor ke daftar utama
+const PRACTICE = "NOM KEP NOM DUV LAB DUV LAB".split(" ");
+
+/* ===================== LOGIKA ===================== */
+const app = document.getElementById("app");
+let state = {pid:"", list:"A", rows:[]};
+
+function keysFor(seq){
+  return seq.map((t,i)=> i<2 ? "NO" : (t===seq[i-2] ? "YES" : "NO"));
+}
+function buildBlock(seqA, list){
+  const seq = list==="B" ? seqA.map(t=>MAP_B[t]) : seqA.slice();
+  const k = keysFor(seq);
+  return seq.map((t,i)=>({trigram:t, correct:k[i], target:(i>=2 && k[i]==="YES")?1:0}));
+}
+function html(h){ app.innerHTML = h; }
+
+function showStart(){
+  html(`<div class="panel">
+    <h1>Tugas 2-Back Trigram</h1>
+    <label for="pid">Kode peserta</label>
+    <input id="pid" autocomplete="off" placeholder="mis. P01">
+    <label for="lst">Daftar trigram</label>
+    <select id="lst"><option value="A">Daftar A (pretest)</option><option value="B">Daftar B (posttest)</option></select>
+    <p class="small">Gunakan keyboard (tombol 1 dan 2) atau tombol di layar. Disarankan layar penuh (F11) dan headphone.</p>
+    <button id="go">Mulai</button>
+  </div>`);
+  document.getElementById("go").onclick = ()=>{
+    const pid = document.getElementById("pid").value.trim();
+    if(!pid){ alert("Isi kode peserta dulu."); return; }
+    state = {pid, list:document.getElementById("lst").value, rows:[]};
+    showInstructions();
+  };
+}
+
+function showInstructions(){
+  html(`<div class="panel">
+    <h1>Petunjuk</h1>
+    <p>Di layar akan muncul rangkaian tiga huruf (trigram) satu per satu.</p>
+    <p>Tugasmu: bandingkan trigram yang <b>sedang tampil</b> dengan trigram <b>dua urutan sebelumnya</b>.</p>
+    <ul>
+      <li>Tekan <b>${CONFIG.KEY_YES} (Ya)</b> bila <b>sama</b>.</li>
+      <li>Tekan <b>${CONFIG.KEY_NO} (Tidak)</b> bila <b>berbeda</b>.</li>
+    </ul>
+    <p>Dua trigram pertama belum punya pembanding, jadi tekan <b>${CONFIG.KEY_NO} (Tidak)</b>. Jawab secepat dan setepat mungkin. Kamu akan berlatih dulu dengan umpan balik.</p>
+    <div style="text-align:center"><button id="go">Mulai latihan</button></div>
+  </div>`);
+  document.getElementById("go").onclick = ()=> runBlock(buildPracticeRows(), "latihan", true, ()=>{
+    interstitial("Latihan selesai. Setelah ini tidak ada umpan balik.", "Mulai blok 1", ()=>runMain(0));
+  });
+}
+function buildPracticeRows(){
+  const k = keysFor(PRACTICE);
+  return PRACTICE.map((t,i)=>({trigram:t, correct:k[i], target:(i>=2&&k[i]==="YES")?1:0}));
+}
+function interstitial(msg, btn, next){
+  html(`<div class="panel" style="text-align:center"><h1>${msg}</h1><button id="go">${btn}</button></div>`);
+  document.getElementById("go").onclick = next;
+}
+function runMain(b){
+  const rows = buildBlock(BLOCKS_A[b], state.list);
+  runBlock(rows, b+1, false, ()=>{
+    if(b<BLOCKS_A.length-1) interstitial(`Blok ${b+1} selesai. Istirahat sebentar.`, `Mulai blok ${b+2}`, ()=>runMain(b+1));
+    else showEnd();
+  });
+}
+
+function runBlock(rows, blockLabel, feedback, done){
+  html(`<div id="stim"></div><div id="fb"></div>
+    <div id="btns"><button data-k="YES">${CONFIG.KEY_YES} &nbsp;Ya</button><button data-k="NO">${CONFIG.KEY_NO} &nbsp;Tidak</button></div>
+    <p class="small" id="prog"></p>`);
+  const stim = document.getElementById("stim"), fb = document.getElementById("fb"), prog = document.getElementById("prog");
+  let i = 0, onset = 0, responded = null, active = false;
+
+  function respond(r){
+    if(!active || responded) return;
+    responded = {r, rt: performance.now() - onset};
+    markPressed(r);
+  }
+  function markPressed(r){
+    const btns = document.getElementById("btns");
+    btns.classList.add("locked");
+    btns.querySelectorAll("button").forEach(b=> b.classList.toggle("pressed", b.dataset.k===r));
+  }
+  function clearPressed(){
+    const btns = document.getElementById("btns");
+    btns.classList.remove("locked");
+    btns.querySelectorAll("button").forEach(b=> b.classList.remove("pressed"));
+  }
+  const keyHandler = e=>{
+    if(e.key===CONFIG.KEY_YES) respond("YES");
+    else if(e.key===CONFIG.KEY_NO) respond("NO");
+  };
+  document.addEventListener("keydown", keyHandler);
+  document.querySelectorAll("#btns button").forEach(b=> b.onclick = ()=>respond(b.dataset.k));
+
+  function trial(){
+    if(i>=rows.length){
+      document.removeEventListener("keydown", keyHandler);
+      done(); return;
+    }
+    const row = rows[i];
+    prog.textContent = `${blockLabel==="latihan"?"Latihan":"Blok "+blockLabel} — trial ${i+1}/${rows.length}`;
+    fb.textContent = ""; responded = null; active = true; clearPressed();
+    stim.textContent = row.trigram;
+    let shown = true, started = false;
+    function frame(ts){
+      const now = performance.now();
+      if(!started){ onset = now; started = true; }
+      const el = now - onset;
+      if(shown && el >= CONFIG.STIM_MS){ stim.textContent = "+"; shown = false; }
+      if(el >= CONFIG.WINDOW_MS){
+        active = false;
+        const resp = responded ? responded.r : "NONE";
+        const correct = resp===row.correct ? 1 : 0;
+        if(!(blockLabel==="latihan")){
+          state.rows.push({
+            participant:state.pid, list:state.list, block:blockLabel, trial:i+1, trigram:row.trigram,
+            is_target:row.target, correct_key:row.correct==="YES"?CONFIG.KEY_YES:CONFIG.KEY_NO,
+            response: resp==="YES"?CONFIG.KEY_YES:resp==="NO"?CONFIG.KEY_NO:"none",
+            correct, rt_ms: responded? Math.round(responded.rt) : "",
+            first_two: i<2?1:0
+          });
+        }
+        if(feedback){
+          fb.textContent = resp==="NONE" ? "Terlambat" : (correct ? "Benar" : "Salah");
+          fb.style.color = correct ? "#1a7f37" : "#b42318";
+          setTimeout(()=>{ i++; trial(); }, 600);
+        } else { i++; trial(); }
+        return;
+      }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+  setTimeout(trial, 800);
+}
+
+function toCSV(rows){
+  const cols = ["participant","list","block","trial","trigram","is_target","correct_key","response","correct","rt_ms","first_two"];
+  return cols.join(",")+"\n"+rows.map(r=>cols.map(c=>r[c]).join(",")).join("\n")+"\n";
+}
+const IS_MOBILE = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+function csvBlob(){ return new Blob(["\ufeff"+toCSV(state.rows)], {type:"text/csv;charset=utf-8"}); }
+function csvFile(){ try{ return new File([csvBlob()], `2back_${state.pid}_list${state.list}.csv`, {type:"text/csv"}); }catch(e){ return null; } }
+function download(){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(csvBlob());
+  a.download = `2back_${state.pid}_list${state.list}.csv`;
+  a.style.display = "none";
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+function setMsg(t){ const m = document.getElementById("endmsg"); if(m) m.textContent = t; }
+async function saveOrShare(){
+  const f = csvFile();
+  if(IS_MOBILE && f && navigator.canShare && navigator.canShare({files:[f]})){
+    try{ await navigator.share({files:[f], title:f.name}); setMsg("Pilih \"Simpan ke Berkas\" (iPhone) atau aplikasi tujuan untuk menyimpan file."); return; }
+    catch(e){ if(e && e.name==="AbortError") return; }
+  }
+  try{ download(); setMsg("Jika tidak ada file yang terunduh, gunakan tombol \"Salin data\"."); }
+  catch(e){ setMsg("Unduhan tidak didukung di browser ini. Gunakan tombol \"Salin data\"."); }
+}
+async function copyData(){
+  const csv = toCSV(state.rows);
+  let ok = false;
+  try{ await navigator.clipboard.writeText(csv); ok = true; }catch(e){}
+  if(!ok){
+    const ta = document.getElementById("datatext");
+    const det = document.getElementById("datadet"); if(det) det.open = true;
+    try{ ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length); ok = document.execCommand("copy"); }catch(e){}
+  }
+  setMsg(ok ? "Data tersalin. Sekarang buka formulir dan tempel (tahan lama di kolom jawaban, pilih Tempel)."
+            : "Belum bisa menyalin otomatis. Buka \"Tampilkan data\", tahan lama di kotak, pilih Pilih Semua lalu Salin.");
+}
+function openForm(){
+  const w = window.open(CONFIG.FORM_URL, "_blank");
+  if(!w) window.location.href = CONFIG.FORM_URL;
+}
+function csvFileName(){ return `2back_${state.pid}_list${state.list}.csv`; }
+async function postEmail(){
+  const csv = toCSV(state.rows);
+  const fd = new FormData();
+  fd.append("_subject", `Hasil 2-back: ${state.pid} (daftar ${state.list})`);
+  fd.append("_captcha", "false");
+  fd.append("_template", "table");
+  fd.append("participant", state.pid);
+  fd.append("list", state.list);
+  fd.append("jumlah_baris", String(state.rows.length));
+  fd.append("data_csv", csv); // salinan teks, berjaga-jaga jika lampiran gagal
+  fd.append("attachment", new Blob(["\ufeff"+csv], {type:"text/csv"}), csvFileName());
+  await fetch("https://formsubmit.co/" + CONFIG.EMAIL_TO, {method:"POST", mode:"no-cors", body:fd});
+}
+async function postSheet(){
+  // Mode cors agar balasan "ok" dari Apps Script bisa dibaca dan keberhasilan benar-benar dicek.
+  const res = await fetch(CONFIG.SHEET_URL, {method:"POST",
+    headers:{"Content-Type":"text/plain;charset=utf-8"}, body:JSON.stringify(state.rows)});
+  const t = await res.text();
+  return t.trim() === "ok";
+}
+async function sendToSheet(){
+  const st = document.getElementById("sendst");
+  if(!st) return;
+  if(!CONFIG.EMAIL_TO && !CONFIG.SHEET_URL){ st.textContent = ""; return; }
+  st.textContent = "Mengirim data ke peneliti...";
+  let ok = true;
+  try{
+    if(CONFIG.EMAIL_TO) await postEmail();
+  }catch(err){ ok = false; }
+  if(CONFIG.SHEET_URL){
+    try{ ok = (await postSheet()) && ok; }catch(err){ ok = false; }
+  }
+  if(ok){
+    st.textContent = "Data berhasil tersimpan di spreadsheet peneliti. File CSV juga terunduh sebagai cadangan.";
+  }else{
+    st.innerHTML = 'Data belum bisa dipastikan masuk ke peneliti. File CSV sudah terunduh, mohon kirim file itu ke peneliti. <button id="retry">Coba kirim lagi</button>';
+    document.getElementById("retry").onclick = sendToSheet;
+  }
+}
+function showEnd(){
+  let rows = state.rows;
+  if(!CONFIG.FIRST_TWO_SCORED) rows = rows.filter(r=>!r.first_two);
+  const acc = rows.length ? (100*rows.reduce((s,r)=>s+r.correct,0)/rows.length) : 0;
+  const rts = rows.filter(r=>r.correct && r.rt_ms!=="").map(r=>r.rt_ms);
+  const mrt = rts.length ? Math.round(rts.reduce((a,b)=>a+b,0)/rts.length) : "-";
+  const mode = CONFIG.FORM_MODE;
+  const stepText = `<li>Ketuk <b>Salin data</b>.</li><li>Ketuk <b>Buka formulir pengiriman</b>, lalu tempel (paste) data di kolom jawaban dan kirim.</li>`;
+  const stepFile = `<li>Ketuk <b>Simpan / bagikan file CSV</b> (nama file: <b>${csvFileName()}</b>).</li><li>Buka formulir pengiriman, lalu unggah file itu dan kirim.</li>`;
+  const steps = mode==="text" ? `<ol>${stepText}</ol>` : mode==="file" ? `<ol>${stepFile}</ol>`
+    : `<p style="margin:6px 0"><b>Cara 1 (disarankan di HP):</b></p><ol>${stepText}</ol><p style="margin:6px 0"><b>Cara 2:</b> jika formulir meminta file</p><ol>${stepFile}</ol>`;
+  html(`<div class="panel" style="text-align:center">
+    <h1>Selesai. Terima kasih!</h1>
+    <p>Akurasi: <b>${acc.toFixed(1)}%</b><br>Rata-rata waktu reaksi (jawaban benar): <b>${mrt} ms</b></p>
+  </div>
+  <div class="panel" style="background:#f3f7ff;border:1px solid #9db8ee;border-radius:8px;padding:14px 18px;margin:8px 0">
+    <b>Langkah terakhir: kirim hasilmu ke peneliti</b>
+    ${steps}
+  </div>
+  <div class="panel">
+    <div class="endbtns">
+      ${mode!=="file" ? '<button id="copybtn" class="primary" type="button">Salin data</button>' : ''}
+      ${mode!=="text" ? '<button id="savebtn" type="button">Simpan / bagikan file CSV</button>' : ''}
+      <button id="formbtn" ${mode==="file"?'class="primary"':''} type="button">Buka formulir pengiriman</button>
+      <a id="formlink" class="btnlink" href="${CONFIG.FORM_URL}" target="_blank" rel="noopener">Jika tombol di atas tidak membuka: ketuk tautan ini</a>
+    </div>
+    <div class="endmsg" id="endmsg" role="status"></div>
+    <p class="small" id="sendst"></p>
+    <details id="datadet"><summary>Tampilkan data (untuk disalin manual)</summary>
+      <textarea id="datatext" readonly></textarea>
+    </details>
+    <div class="endbtns"><button id="again" type="button">Kembali ke awal (peserta / sesi berikutnya)</button></div>
+    <p class="small">Pastikan data sudah terkirim lewat formulir sebelum kembali ke awal, karena data sesi ini akan dihapus dari halaman.</p>
+  </div>`);
+  document.getElementById("datatext").value = toCSV(state.rows);
+  document.getElementById("datatext").onfocus = function(){ this.select(); };
+  const cb = document.getElementById("copybtn"); if(cb) cb.onclick = copyData;
+  const sb = document.getElementById("savebtn"); if(sb) sb.onclick = saveOrShare;
+  document.getElementById("formbtn").onclick = openForm;
+  document.getElementById("again").onclick = ()=>{
+    if(confirm("Kembali ke awal? Pastikan data sudah terkirim lewat formulir.")) showStart();
+  };
+  window.scrollTo(0,0);
+  if(!IS_MOBILE) download();   // di HP tidak diunduh otomatis (sering diblokir / memindahkan halaman di iOS)
+  sendToSheet();
+}
+showStart();
+</script>
+</body>
+</html>
