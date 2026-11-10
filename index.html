@@ -50,15 +50,20 @@ const CONFIG = {
   FORM_URL: "https://forms.gle/Mo6CKVaBHxDUwwnFA" // peserta mengunggah file CSV lewat Google Form ini
 };
 
-const LIST_A = "HEV SIJ YIC FEH ZEW ZUQ KAJ JAL TOZ VUB VAF ZIM WUH ZOJ GOX".split(" ");
-const LIST_B = "VAB REH GAQ XAW HIB JOR KES KIG WUF TEV TOV VUM GUZ ZIV SOF".split(" ");
+// Semua trigram berasal dari Table 1 Ampofo et al. (2023).
+// Daftar A (pretest): 15 trigram yang tidak dipakai di versi sebelumnya (kolom "Italian List A/B" yang berbeda dari versi Amerika).
+const LIST_A = "NIR GOQ LEB SUQ BAV ZAH VUD HUF ZOG CIZ DAZ ZAN TEB VIH QOL".split(" ");
+// Daftar B (posttest): "American List A" Ampofo. Pasangan A-ke-B dipetakan berdasarkan urutan (posisi 1 dengan posisi 1, dst.).
+const LIST_B = "HEV SIJ YIC FEH ZEW ZUQ KAJ JAL TOZ VUB VAF ZIM WUH ZOJ GOX".split(" ");
 const MAP_B = Object.fromEntries(LIST_A.map((t,i)=>[t,LIST_B[i]]));
 
-// Urutan blok (List A): 3 blok x 10 trial, 4 target per blok (12 target dari 30 trial, sama dengan Luo). List B memakai struktur sama lewat pemetaan.
+// Urutan blok (Daftar A): 3 blok x 10 trial, 4 target per blok (12 target dari 30 trial, 40% seperti Luo).
+// Tingkat kesulitan naik per blok lewat "lure": trigram yang sama dengan 3 trial sebelumnya (n+1 back) tetapi BUKAN target 2-back.
+// Daftar B memakai struktur yang sama lewat pemetaan, jadi kesulitan pretest dan posttest setara.
 const BLOCKS_A = [
-  "ZIM KAJ TOZ KAJ TOZ YIC SIJ YIC SIJ FEH",   // blok 1: target di trial 4, 5, 8, 9
-  "HEV JAL VAF JAL VAF ZEW HEV ZUQ HEV ZUQ",   // blok 2: target di trial 4, 5, 9, 10
-  "TOZ VUB ZUQ ZEW ZUQ ZEW GOX YIC GOX YIC"   // blok 3: target di trial 5, 6, 9, 10
+  "ZAH NIR QOL NIR QOL GOQ CIZ GOQ CIZ ZOG",   // blok 1 (dasar): 4 target di trial 4, 5, 8, 9; tanpa lure
+  "TEB SUQ HUF TEB SUQ TEB SUQ BAV SUQ BAV",   // blok 2 (sulit): 4 target di trial 6, 7, 9, 10; 2 lure 3-back di trial 4 dan 5
+  "DAZ VIH DAZ VIH ZAN DAZ VIH ZAN VIH ZAN"   // blok 3 (sangat sulit): 4 target di trial 3, 4, 9, 10; 3 lure 3-back berturut-turut di trial 6, 7, 8; hanya 3 trigram berbeda
 ].map(s=>s.split(" "));
 
 // Latihan 7 trial (3 target) memakai trigram lain supaya tidak bocor ke daftar utama
